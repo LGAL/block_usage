@@ -1,0 +1,128 @@
+#PART 1
+
+#!/bin/bash
+ENVS=(login suite suite0 suite10 suite11 suite12 suite14 suite15 suite16 suite17 suite18 suite19 suite20 suite21 suite22 suite23 suite24 suite25 suite26 suite27 suite28 suite29 suite30 suite31 suite314 suite32 suite33 suite34 suite35 suite36 suite37 suite38 suite39 suite40 suite41 suite42 suite43 suite44 suite45 suite46 suite47 suite48 suite49 suite5 suite50 suite51 suite52 suite53 suite54 suite55 suite56 suite6 suite7 suite8 suite9 www www1)
+# ENVS=(suite15)
+
+date
+for env in "${ENVS[@]}"
+do
+    echo fetch: $env
+    ssh devmgmt1 "echo \"select CONCAT(campaigns.created, ',', campaigns.last_updated, ',', MAX(launches.start), ',$env,', campaigns.customer, ',', campaigns.id, ',', campaigns.type ) as '### $env env:' from campaigns left join program_sub_email on program_sub_email.email_id = campaigns.parent_campaign left join launches on campaigns.id = launches.campaign where launches.start > '2021-01-01' and campaigns.content_type = 'block' and campaigns.type IN (1,2,3,6,7) and program_sub_email.email_id is NULL group by campaigns.id order by campaigns.last_updated desc;\" | /usr/local/sbin/database.sh $env" >> ./suite_campaigns.csv
+
+done
+
+
+
+
+#PART 2
+
+import { eqBy, prop, uniqWith } from 'ramda';
+import { MigrationType } from '../../../modules/dal/migration-dal/interface';
+import { templateModel } from '../../../modules/dal/template-dal/lib/schema';
+import { campaignModel } from '../../../modules/dal/campaign-dal/schema';
+import * as mongoose from 'mongoose';
+import { Schema } from 'mongoose';
+import { omit } from 'ramda';
+
+export const blockUsageSchema = new Schema(
+  {
+    created_at: String,
+    updated_at: String,
+    launch_time: String,
+    env: String,
+    customer_id: Number,
+    suite_campaign_id: Number,
+    campaign_type: Number,
+    template_id: String,
+    template_block_templates_count: String,
+    template_blocks_count: String,
+    template_unique_blocks_count: String,
+    campaign_block_templates_count: String,
+    campaign_blocks_count: String,
+    campaign_unique_blocks_count: String,
+  },
+  {
+    autoIndex: false,
+    minimize: false,
+  },
+);
+
+export const BlockUsageSuiteSchema = new Schema(
+  {
+    created_at: String,
+    updated_at: String,
+    launch_time: String,
+    env: String,
+    suite_campaign_id: Number,
+    customer_id: Number,
+    campaign_type: Number,
+  },
+  {
+    autoIndex: false,
+    minimize: false,
+  },
+);
+
+export const BlockUsageMissingSchema = new Schema(
+  {
+    created_at: String,
+    updated_at: String,
+    launch_time: String,
+    env: String,
+    suite_campaign_id: Number,
+    customer_id: Number,
+    campaign_type: Number,
+  },
+  {
+    autoIndex: false,
+    minimize: false,
+  },
+);
+
+export const blockUsageMissingModel = mongoose.model<mongoose.Document & any>(
+  'BlockUsageMissing',
+  BlockUsageMissingSchema,
+);
+export const blockUsageModel = mongoose.model<mongoose.Document & any>('BlockUsage', blockUsageSchema);
+export const blockUsageSuiteModel = mongoose.model<mongoose.Document & any>('BlockUsageSuite', BlockUsageSuiteSchema);
+
+export function collectBlockUsages(_logger: any): (migrationType: MigrationType, item: any) => Promise<any> {
+  return async (_migrationType, item) => {
+    const suiteCampaign: any = item.toObject();
+    const campaignDocument = await campaignModel.findOne({
+      suite_campaign_id: suiteCampaign.suite_campaign_id,
+      customer_id: suiteCampaign.customer_id,
+    });
+
+    if (campaignDocument) {
+      const campaign = campaignDocument.toJSON();
+      const template = await templateModel.findOne({ _id: campaign.template });
+
+      const data = {
+        ...omit(['_id'], suiteCampaign),
+        template_id: campaign.template,
+        template_block_templates_count: !template ? '' : template.toJSON().available_block_templates.length,
+        template_blocks_count: !template ? '' : template.toJSON().blocks.length,
+        template_unique_blocks_count: !template
+          ? ''
+          : uniqWith(eqBy(prop('template')), template.toJSON().blocks).length,
+        campaign_block_templates_count: campaign.available_block_templates.length,
+        campaign_blocks_count: campaign.blocks.length,
+        campaign_unique_blocks_count: uniqWith(eqBy(prop('template')), campaign.blocks).length,
+      };
+
+      await blockUsageModel.update(
+        { suite_campaign_id: campaign.suite_campaign_id, customer_id: campaign.customer_id },
+        data,
+        { upsert: true },
+      );
+    } else {
+      await blockUsageMissingModel.update(
+        { suite_campaign_id: suiteCampaign.suite_campaign_id, customer_id: suiteCampaign.customer_id },
+        omit(['_id'], suiteCampaign),
+        { upsert: true },
+      );
+    }
+  };
+}
