@@ -125,3 +125,53 @@ from bu_customers
 group by customer_id
 having count(env)>1;
 -- no rows returned, i.e. each customer_id appears in one and only one environment.
+
+-- 2021.11.20
+-- Döntés született, hogy azokat a sorokat, amelyek megsértik a 4. és 5. feltételezést, kihagyjuk a mintából
+-- hogy biztosítsuk a feltételeket a további aggregálások tisztasága végett.
+-- A feltételek:
+-- 4. A temlate-ek egyedi azonosítója az (env,template_id) rendezett pár.
+-- 5. Minden template egy és csak egy customer-hez tartozik, ahol a customer a (customer_id) azonosít az össszes env-en keresztül.
+
+-- 33.309 problémás campaign sort kiszűrtünk a block_usage 663.713 sorából, így maradt 630.404 sor
+-- amit egy új táblában tárolunk a további műveletekhez: block_usage_cleaned.
+create table block_usage_cleaned as
+(
+with problematic_templates as
+(select env,template_id, count(*) from bu_env_cust_templates_values
+group by env,template_id
+having count(*) > 1
+),
+problematic_campaigns as
+(select distinct bu.env, bu.suite_campaign_id
+from block_usage bu
+join problematic_templates pt
+  on bu.env=pt.env and bu.template_id=pt.template_id
+)
+select bu.*
+from block_usage bu
+left outer join problematic_campaigns pc
+on (bu.env=pc.env and bu.suite_campaign_id = pc.suite_campaign_id)
+where pc.suite_campaign_id is NULL
+);
+
+-- mielőtt tovább mennénk a block_usage_cleaned-en ismét elvégezzük a fenti ellenőrzéseket,
+-- hogy biztosak legyünk abban, hogy jól csináltuk.
+create table bu_env_cust_templates_values_cleaned as
+select distinct
+env, customer_id, template_id, template_block_templates_count, template_blocks_count, template_unique_blocks_count
+from block_usage_cleaned;
+-- 6.213 sor jött létre  
+
+create table bu_env_cust_templates_cleaned as
+select distinct
+env, customer_id, template_id
+from block_usage_cleaned;
+-- 6.213 sor jött létre, no ez már ígéretes
+
+create table bu_env_templates_cleaned as
+select distinct
+env, template_id
+from block_usage_cleaned;
+-- 6.213 sor jött létre, tehát rendben vagyunk.
+-- Kezdődhet a feldolgozás.
