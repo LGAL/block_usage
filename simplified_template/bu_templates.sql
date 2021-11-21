@@ -248,4 +248,8 @@ call SetMedian(6000);
 
 -- 7. Ellenőrzés: van-e olyan tempáltum, amihez nem számoltuk ki a mediánt?
 
-select * from bu_templates  where med_cub_count is not null order by rn desc;
+select * from bu_templates  where med_cub_count is not null order by rn asc;
+-- 6.213 sor jött vissza, azaz mindegyikhez kiszámoltuk
+-- Ennek a lekérdezésnek az eredményét exportáljuk block_usage_templates_with_campgaign_stats.csv-be
+-- excellel majd block_usage_templates_with_campgaign_stats.xlsx-be némi csinosítás után.
+-- Innen excel elemzés jön grafikákkal, stb.
