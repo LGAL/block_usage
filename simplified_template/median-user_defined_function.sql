@@ -17,5 +17,3 @@ WHERE
 t.rowindex IN (FLOOR(@rowindex / 2), CEIL(@rowindex / 2));
 RETURN v_median;
 END;
-
-select median('A','B');

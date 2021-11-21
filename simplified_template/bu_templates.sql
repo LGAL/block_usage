@@ -163,6 +163,7 @@ env, customer_id, template_id, template_block_templates_count, template_blocks_c
 from block_usage_cleaned;
 -- 6.213 sor jött létre  
 
+
 create table bu_env_cust_templates_cleaned as
 select distinct
 env, customer_id, template_id
@@ -175,3 +176,76 @@ env, template_id
 from block_usage_cleaned;
 -- 6.213 sor jött létre, tehát rendben vagyunk.
 -- Kezdődhet a feldolgozás.
+
+-- ===== Az első kérdés, amire keressük a választ ====
+-- Mennyire hasonlít egy kampány egy template-re a felhasznált unique blockok számát tekintve?
+-- -    Mekkora az eltérés a blockok számaiban %-osan (hisztogram)
+-- Kampányonként megnézni a diff-et a number of blocks_tp és number of blocks_cp között -> igaz-e
+-- hogy a kevés blokkú kampányok esetében kisebb az eltérés, mint a sokk blokkúaknál?
+-- Először a unique blokkokra
+
+-- Végrehajtási terv:
+-- 0. Csinálunk egy bővített tempate values táblát
+create table bu_env_cust_templates_values_cleaned_x as 
+select 
+env, customer_id, template_id, template_block_templates_count, template_blocks_count, template_unique_blocks_count, 
+count(*) as campgaign_count, 
+avg(campaign_unique_blocks_count) as avg_cub_count,
+0 as med_cub_count,
+max(campaign_unique_blocks_count) as max_cub_count, 
+min(campaign_unique_blocks_count) as min_cub_count, 
+stddev_pop(campaign_unique_blocks_count) as stddev_pop_cub_count
+from block_usage_cleaned buc 
+group by env, customer_id, template_id, template_block_templates_count, template_blocks_count, template_unique_blocks_count 
+;
+
+
+-- 1. a bu_env_cust_templates_values_cleaned_x táblára volna szükségünk, de a nevét egyszerűsítendő
+-- átmásoljuk a bu_temlates táblába úgy, hogy sorszám oszlopot adunk hozzá és , majd ezen dolgozunk
+
+drop table bu_templates;
+
+create table bu_templates as
+select
+  row_number() over ( order by env,template_id ) as rn,
+  env,
+  customer_id,
+  template_id,
+  template_block_templates_count,
+  template_blocks_count,
+  template_unique_blocks_count,
+  campgaign_count,
+  avg_cub_count,
+  med_cub_count,
+  max_cub_count,
+  min_cub_count,
+  stddev_pop_cub_count
+from bu_env_cust_templates_values_cleaned_x;
+
+-- 2. (env,template_id) primary key constraint-et definiálunk a bu_templates táblán, hogy védjük a konzisztenciát
+ALTER TABLE `eszter`.`bu_templates` 
+CHANGE COLUMN `template_id` `template_id` VARCHAR(30) NOT NULL ,
+ADD PRIMARY KEY (`env`, `template_id`);
+
+-- 3. A MySQL-ben nincs medián függvény, ezért a netről szedtem egy mintánt és írtam a következő függvényt:
+-- tp_cp_unique_block_count_median_function.sql
+-- Ezt kell lefuttatni, hogy létrejöjjön a function az adatbázisban.
+
+-- 5. Egy nagy update utasítással próbáljuk egyszerre kiszámítani mind a 6.213 template campány mediánjait.
+update bu_templates set tp_cp_ubc_med = tp_cp_ubc_med(env,template_id) where tp_cp_ubc_med is null;
+commit;
+-- Ez kicsit megfekszi a MySQL Workbench hasát.
+-- Az Edit/Preferences/SQL Editor alatt a DBMS Connection read time out (in Second) értékét kell
+-- jó nagyra állítani. A maximum 99999, de 7200 már két órát jelent és ez elég lehet nekünk.
+
+-- 6. Hogy darabokban csináljuk a dolgot, egy procedúrát írtam, amiben a bemenő paraméter meghatározza
+-- hogy mennyi templátummal dolgozzon egyszerre. K.b. 1 perc alatt tud megcsinálni százat, így
+-- kb 60+ perc, egy jó bő óra a hatezer-párszáz templátum
+-- Lehet, hogy ez egyetlen SQL utasítással is menne az 5. pont beli UPDATE-tel, de megcsináltam a procedúrát
+-- a proc_SetMedian.sql file-ban. Ezt kell lefuttatni, hogy létrejöjjön a procedúra az adatbázisban.
+
+call SetMedian(6000);
+
+-- 7. Ellenőrzés: van-e olyan tempáltum, amihez nem számoltuk ki a mediánt?
+
+select * from bu_templates  where med_cub_count is not null order by rn desc;
