@@ -1,2 +1,2 @@
 # block_usage
-Block usage scripts for MySQL data manipulation and analysis
+Block usage szkriptek adat előfeldolgozáshoz MySQL adatbázishoz.
