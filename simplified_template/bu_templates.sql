@@ -154,6 +154,10 @@ left outer join problematic_campaigns pc
 on (bu.env=pc.env and bu.suite_campaign_id = pc.suite_campaign_id)
 where pc.suite_campaign_id is NULL
 );
+-- Itt is definiáljuk az elsődleges kulcsot
+ALTER TABLE block_usage_cleaned
+ADD PRIMARY KEY (env, suite_campaign_id);
+;
 
 -- mielőtt tovább mennénk a block_usage_cleaned-en ismét elvégezzük a fenti ellenőrzéseket,
 -- hogy biztosak legyünk abban, hogy jól csináltuk.
@@ -232,23 +236,37 @@ ADD PRIMARY KEY (`env`, `template_id`);
 -- Ezt kell lefuttatni, hogy létrejöjjön a function az adatbázisban.
 
 -- 5. Egy nagy update utasítással próbáljuk egyszerre kiszámítani mind a 6.213 template campány mediánjait.
+/*
 update bu_templates set tp_cp_ubc_med = tp_cp_ubc_med(env,template_id) where tp_cp_ubc_med is null;
 commit;
--- Ez kicsit megfekszi a MySQL Workbench hasát.
+*/
+-- Ez kicsit megfekszi a MySQL Workbench hasát, kb 2 óráig futna, de time limit miatt általában elhasal.
 -- Az Edit/Preferences/SQL Editor alatt a DBMS Connection read time out (in Second) értékét kell
--- jó nagyra állítani. A maximum 99999, de 7200 már két órát jelent és ez elég lehet nekünk.
+-- jó nagyra állítani. A maximum 99999, de 7200 már két órát jelent és ez elég lehet nekünk,
+-- de megpróbáljuk okosabban:
+-- Megpróbáljuk gyorsítani ezt egy index-szel, mivel a függvégy egy adott (env,template_id) párra keres rekordokat
+-- a 630 ezer soros táblából és minden alkalommal "full table scan"-t kell csinálnia. 
+-- Ha indexet rakunk a block_usage_cleaned alaptáblára, talán ez meggyorsul, lássuk.
+ALTER TABLE block_usage_cleaned
+ADD INDEX ENV_TEMP (env ASC, template_id ASC) VISIBLE;
+
+update bu_templates set tp_cp_ubc_med = tp_cp_ubc_med(env,template_id) where tp_cp_ubc_med is null;
+commit;
+-- ezután a fenti update 6.672 másodperc alatt fut le. Wow!
+-- Ezután az alábbi 6. pont és a procedúra már nem szükséges, de jó gyakorlat volt.
+-- A 6. lépés leírását és a kód részeket azért benthagyom egyelőre referenciának.
 
 -- 6. Hogy darabokban csináljuk a dolgot, egy procedúrát írtam, amiben a bemenő paraméter meghatározza
 -- hogy mennyi templátummal dolgozzon egyszerre. K.b. 1 perc alatt tud megcsinálni százat, így
 -- kb 60+ perc, egy jó bő óra a hatezer-párszáz templátum
 -- Lehet, hogy ez egyetlen SQL utasítással is menne az 5. pont beli UPDATE-tel, de megcsináltam a procedúrát
 -- a proc_SetMedian.sql file-ban. Ezt kell lefuttatni, hogy létrejöjjön a procedúra az adatbázisban.
-
 call SetMedian(6000);
 
 -- 7. Ellenőrzés: van-e olyan tempáltum, amihez nem számoltuk ki a mediánt?
 
-select * from bu_templates  where med_cub_count is not null order by rn asc;
+select * from bu_templates  where med_cub_count is null order by rn asc; -- no row(s) returned. Bingo!
+select * from bu_templates  where med_cub_count is not null order by rn asc; -- 6213 rows(s) returned. Bingo!
 -- 6.213 sor jött vissza, azaz mindegyikhez kiszámoltuk
 -- Ennek a lekérdezésnek az eredményét exportáljuk block_usage_templates_with_campgaign_stats.csv-be
 -- excellel majd block_usage_templates_with_campgaign_stats.xlsx-be némi csinosítás után.
