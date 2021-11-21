@@ -189,13 +189,26 @@ from block_usage_cleaned;
 -- Először a unique blokkokra
 
 -- Végrehajtási terv:
--- 0. Csinálunk egy bővített tempate values táblát
+-- 1. A MySQL-ben nincs medián függvény, ezért a netről szedtem egy mintánt és írtam a következő függvényt:
+--    tp_cp_unique_block_count_median_function.sql
+--    Ezt kell lefuttatni, hogy létrejöjjön a function az adatbázisban.
+-- 2. Hangolás: Ahhoz, hogy a fenti median függvényt hatékonyan lehessen használni más 
+--    SQL utasításokban, egy indexet kell létrehozni a medián számításának támogatásához.
+ALTER TABLE block_usage_cleaned
+ADD INDEX ENV_TEMP (env ASC, template_id ASC) VISIBLE;
+
+-- 3. Csinálunk egy bővített tempate values táblát, ami mindent tartalmaz már
+--    Ez a lényege az egész manipulációnak, benne van minden okosságunk.
+drop table bu_env_cust_templates_values_cleaned_x;
+
 create table bu_env_cust_templates_values_cleaned_x as 
 select 
 env, customer_id, template_id, template_block_templates_count, template_blocks_count, template_unique_blocks_count, 
 count(*) as campgaign_count, 
 avg(campaign_unique_blocks_count) as avg_cub_count,
-0 as med_cub_count,
+template_unique_blocks_count - avg(campaign_unique_blocks_count) as templ_avg_cub_count_diff,
+tp_cp_ubc_med(env,template_id) as med_cub_count,
+template_unique_blocks_count - tp_cp_ubc_med(env,template_id) as templ_med_cub_count_diff,
 max(campaign_unique_blocks_count) as max_cub_count, 
 min(campaign_unique_blocks_count) as min_cub_count, 
 stddev_pop(campaign_unique_blocks_count) as stddev_pop_cub_count
@@ -203,67 +216,27 @@ from block_usage_cleaned buc
 group by env, customer_id, template_id, template_block_templates_count, template_blocks_count, template_unique_blocks_count 
 ;
 
+select * from bu_env_cust_templates_values_cleaned_x;
 
--- 1. a bu_env_cust_templates_values_cleaned_x táblára volna szükségünk, de a nevét egyszerűsítendő
--- átmásoljuk a bu_temlates táblába úgy, hogy sorszám oszlopot adunk hozzá és , majd ezen dolgozunk
+-- 4. Erre a bu_env_cust_templates_values_cleaned_x táblára volna szükségünk,
+--    de a nevét egyszerűsítendő átmásoljuk a bu_temlates táblába úgy,
+--    hogy sorszám oszlopot adunk hozzá és , majd ezen dolgozunk.
 
 drop table bu_templates;
 
 create table bu_templates as
 select
   row_number() over ( order by env,template_id ) as rn,
-  env,
-  customer_id,
-  template_id,
-  template_block_templates_count,
-  template_blocks_count,
-  template_unique_blocks_count,
-  campgaign_count,
-  avg_cub_count,
-  med_cub_count,
-  max_cub_count,
-  min_cub_count,
-  stddev_pop_cub_count
-from bu_env_cust_templates_values_cleaned_x;
+  x.*
+from bu_env_cust_templates_values_cleaned_x x;
 
--- 2. (env,template_id) primary key constraint-et definiálunk a bu_templates táblán, hogy védjük a konzisztenciát
+-- 5. (env,template_id) primary key constraint-et definiálunk a bu_templates táblán,
+--    hogy védjük a konzisztenciát
 ALTER TABLE `eszter`.`bu_templates` 
 CHANGE COLUMN `template_id` `template_id` VARCHAR(30) NOT NULL ,
 ADD PRIMARY KEY (`env`, `template_id`);
 
--- 3. A MySQL-ben nincs medián függvény, ezért a netről szedtem egy mintánt és írtam a következő függvényt:
--- tp_cp_unique_block_count_median_function.sql
--- Ezt kell lefuttatni, hogy létrejöjjön a function az adatbázisban.
-
--- 5. Egy nagy update utasítással próbáljuk egyszerre kiszámítani mind a 6.213 template campány mediánjait.
-/*
-update bu_templates set tp_cp_ubc_med = tp_cp_ubc_med(env,template_id) where tp_cp_ubc_med is null;
-commit;
-*/
--- Ez kicsit megfekszi a MySQL Workbench hasát, kb 2 óráig futna, de time limit miatt általában elhasal.
--- Az Edit/Preferences/SQL Editor alatt a DBMS Connection read time out (in Second) értékét kell
--- jó nagyra állítani. A maximum 99999, de 7200 már két órát jelent és ez elég lehet nekünk,
--- de megpróbáljuk okosabban:
--- Megpróbáljuk gyorsítani ezt egy index-szel, mivel a függvégy egy adott (env,template_id) párra keres rekordokat
--- a 630 ezer soros táblából és minden alkalommal "full table scan"-t kell csinálnia. 
--- Ha indexet rakunk a block_usage_cleaned alaptáblára, talán ez meggyorsul, lássuk.
-ALTER TABLE block_usage_cleaned
-ADD INDEX ENV_TEMP (env ASC, template_id ASC) VISIBLE;
-
-update bu_templates set tp_cp_ubc_med = tp_cp_ubc_med(env,template_id) where tp_cp_ubc_med is null;
-commit;
--- ezután a fenti update 6.672 másodperc alatt fut le. Wow!
--- Ezután az alábbi 6. pont és a procedúra már nem szükséges, de jó gyakorlat volt.
--- A 6. lépés leírását és a kód részeket azért benthagyom egyelőre referenciának.
-
--- 6. Hogy darabokban csináljuk a dolgot, egy procedúrát írtam, amiben a bemenő paraméter meghatározza
--- hogy mennyi templátummal dolgozzon egyszerre. K.b. 1 perc alatt tud megcsinálni százat, így
--- kb 60+ perc, egy jó bő óra a hatezer-párszáz templátum
--- Lehet, hogy ez egyetlen SQL utasítással is menne az 5. pont beli UPDATE-tel, de megcsináltam a procedúrát
--- a proc_SetMedian.sql file-ban. Ezt kell lefuttatni, hogy létrejöjjön a procedúra az adatbázisban.
-call SetMedian(6000);
-
--- 7. Ellenőrzés: van-e olyan tempáltum, amihez nem számoltuk ki a mediánt?
+-- 6. Ellenőrzés: van-e olyan tempáltum, amihez nem számoltuk ki a mediánt?
 
 select * from bu_templates  where med_cub_count is null order by rn asc; -- no row(s) returned. Bingo!
 select * from bu_templates  where med_cub_count is not null order by rn asc; -- 6213 rows(s) returned. Bingo!
@@ -271,3 +244,6 @@ select * from bu_templates  where med_cub_count is not null order by rn asc; -- 
 -- Ennek a lekérdezésnek az eredményét exportáljuk block_usage_templates_with_campgaign_stats.csv-be
 -- excellel majd block_usage_templates_with_campgaign_stats.xlsx-be némi csinosítás után.
 -- Innen excel elemzés jön grafikákkal, stb.
+
+-- 7. Export
+select * from bu_templates; -- majd csv és xls fájlba tesszük
