@@ -21,6 +21,19 @@ from eszter.block_usage
 group by campaign_unique_blocks_count
 order by campaign_unique_blocks_count asc
 ;
-campaign_unique_blocks_count
 
-select * from
+-- 2021.12.10
+-- unique block darabszám templateben eloszlás  
+select template_unique_blocks_count, count(distinct concat( template_id,env))
+from eszter.block_usage
+where template_unique_blocks_count is not NULL
+group by template_unique_blocks_count
+order by template_unique_blocks_count asc
+;
+
+select template_unique_blocks_count, count(distinct concat( template_id,env))
+from eszter.block_usage_cleaned
+where template_unique_blocks_count is not NULL
+group by template_unique_blocks_count
+order by template_unique_blocks_count asc
+;
