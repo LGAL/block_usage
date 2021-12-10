@@ -10,7 +10,7 @@
 --
 -- ASSUMPTIONS to check
 -- 1. The block_usage data set describes campaigns where each campaign has one and only one row in the data set
--- 2. The campaigns are uniquiely identified by the (env, suite_campaign_id) pairs -- we have checked and this is true!
+-- 2. The campaigns are uniquely identified by the (env, suite_campaign_id) pairs -- we have checked and this is true!
 -- 3. Each campaign uses one and only one template, where the template related attributes for the campaign's template
 --    are present in each campaign row (i.e. the template information is denormalized in the data set).
 -- 4. The templates are uniquely identified by the (env,template_id) pairs -- THIS NEEDS TO BE CHECKED below
