@@ -130,8 +130,8 @@ having count(env)>1;
 -- Döntés született, hogy azokat a sorokat, amelyek megsértik a 4. és 5. feltételezést, kihagyjuk a mintából
 -- hogy biztosítsuk a feltételeket a további aggregálások tisztasága végett.
 -- A feltételek:
--- 4. A temlate-ek egyedi azonosítója az (env,template_id) rendezett pár.
--- 5. Minden template egy és csak egy customer-hez tartozik, ahol a customer a (customer_id) azonosít az össszes env-en keresztül.
+-- 4. A template-ek egyedi azonosítója az (env,template_id) rendezett pár.
+-- 5. Minden template egy és csak egy customer-hez tartozik, ahol a customer a (customer_id) azonosít az összes env-en keresztül.
 
 -- 33.309 problémás campaign sort kiszűrtünk a block_usage 663.713 sorából, így maradt 630.404 sor
 -- amit egy új táblában tárolunk a további műveletekhez: block_usage_cleaned.
